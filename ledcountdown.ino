@@ -14,7 +14,7 @@
 #define MATRIX_COLUMNS  14
 
 #define NUM_LEDS        MATRIX_ROWS * MATRIX_COLUMNS
-#define BRIGHTNESS      32
+#define BRIGHTNESS      64
 #define LED_TYPE        WS2812B
 #define COLOR_ORDER     RGB
 CRGB leds[NUM_LEDS];
@@ -207,12 +207,98 @@ void drawDigit(int digit) {
   
   FastLED.show();
 }
+
+const char* catBitmap[MATRIX_ROWS] = {
+  "00000000000000",  // Row 0 (empty)
+  "00000000000000",  // Row 1 (empty)
+  "00010000001000",  // Row 2: head top (ear tips at col 3 and col 10)
+  "00111000111000",  // Row 3: expanded ears
+  "01111101111100",  // Row 4: upper face (body of head)
+  "01111111111110",  // Row 5: head full
+  "00111111111100",  // Row 6: chin/neck
+  "00111111111100",  // Row 7: beginning of body
+  "00111111111100",  // Row 8
+  "00111111111100",  // Row 9
+  "00111111111100",  // Row 10
+  "00011111111000",  // Row 11: body tapers slightly
+  "00011111111000",  // Row 12
+  "00011111111000",  // Row 13
+  "00011111111000",  // Row 14
+  "00011111111000",  // Row 15
+  "00001111110000",  // Row 16: lower body/legs
+  "00001111110000",  // Row 17
+  "00001111110000",  // Row 18
+  "00001111110000",  // Row 19
+  "00001111110000",  // Row 20
+  "00000111111000",  // Row 21: start of tail region
+  "00000011111000",  // Row 22: tail shifts right
+  "00000001111000",  // Row 23: tail thins out
+  "00000000111000",  // Row 24: tail tapering
+  "00000000111000",  // Row 25
+  "00000000111000",  // Row 26
+  "00000000111000"   // Row 27
+};
+
+const char* treeBitmap[MATRIX_ROWS] = {
+  "00000000000000",  // Row 0: Blank
+  "00000000000000",  // Row 1: Blank
+  
+  // CANOPY (Rows 2–17)
+  "00000LLLL00000",  // Row 2:  4 L's (5 off, 4 L, 5 off)
+  "0000LLLLLL0000",  // Row 3:  6 L's (4 off, 6 L, 4 off)
+  "000LLLLLLLL000",  // Row 4:  8 L's (3 off, 8 L, 3 off)
+  "00LLLLLLLLLL00",  // Row 5: 10 L's (2 off, 10 L, 2 off)
+  "0LLLLLLLLLLLL0",  // Row 6: 12 L's (1 off, 12 L, 1 off)
+  "LLLLLLLLLLLLLL",  // Row 7: Full 14 L's
+  "LLLLLLLLLLLLLL",  // Row 8: Full 14 L's
+  "LLLLLLLLLLLLLL",  // Row 9: Full 14 L's
+  "LLLLLLLLLLLLLL",  // Row 10: Full 14 L's
+  "LLLLLLLLLLLLLL",  // Row 11: Full 14 L's
+  "0LLLLLLLLLLLL0",  // Row 12: 12 L's
+  "00LLLLLLLLLL00",  // Row 13: 10 L's
+  "000LLLLLLLL000",  // Row 14:  8 L's
+  "0000LLLLLL0000",  // Row 15:  6 L's
+  "00000LLLL00000",  // Row 16:  4 L's
+  "00000LLLL00000",  // Row 17:  4 L's
+  
+  // TRUNK (Rows 18–27)
+  "00000TTTT00000",  // Row 18
+  "00000TTTT00000",  // Row 19
+  "00000TTTT00000",  // Row 20
+  "00000TTTT00000",  // Row 21
+  "00000TTTT00000",  // Row 22
+  "00000TTTT00000",  // Row 23
+  "00000TTTT00000",  // Row 24
+  "00000TTTT00000",  // Row 25
+  "00000TTTT00000",  // Row 26
+  "00000TTTT00000"   // Row 27
+};
+
+
 void loop()
 {
     for (int i = 9; i >= 0; i--) {
         drawDigit(i);
         delay(1000);  // Wait 1 second
     }
+    // CRGB leafColor = CRGB::Green;
+    // CRGB trunkColor = CRGB::SaddleBrown; // A brown tone
+
+    // // Draw the tree: iterate over each row and column.
+    // for (int y = 0; y < MATRIX_ROWS; y++) {
+    //   for (int x = 0; x < MATRIX_COLUMNS; x++) {
+    //     char pixel = treeBitmap[y][x];
+    //     if (pixel == 'L') {
+    //       leds[index(x, y)] = leafColor;
+    //     } else if (pixel == 'T') {
+    //       leds[index(x, y)] = trunkColor;
+    //     } else {
+    //       leds[index(x, y)] = CRGB::Black;
+    //     }
+    //   }
+    // }
+    
+    FastLED.show();
    
   
 }
