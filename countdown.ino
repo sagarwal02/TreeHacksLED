@@ -1,140 +1,202 @@
 #include <Adafruit_GFX.h>
 #include <FastLED_NeoMatrix.h>
 #include <FastLED.h>
-
-// Choose your prefered pixmap
-#include "heart24.h"
-#include "google32.h"
+#include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
 #define PIN 12
-
-// Max is 255
 #define BRIGHTNESS 16
 
+// Each panel is 14 columns x 28 rows; we have 3 panels side by side.
 #define MATRIX_COLUMNS 14
 #define MATRIX_ROWS 28
 #define PANEL_COUNT 3
 
-#define WIDTH MATRIX_COLUMNS * PANEL_COUNT
-#define LED_COUNT WIDTH * MATRIX_ROWS
+#define WIDTH (MATRIX_COLUMNS * PANEL_COUNT)
+#define LED_COUNT (WIDTH * MATRIX_ROWS)
 
-int mw = WIDTH;
-int mh = MATRIX_ROWS;
+int mw = WIDTH;      // Matrix width (42 pixels)
+int mh = MATRIX_ROWS; // Matrix height (28 pixels)
 
+// Create the LED array and initialize the matrix object.
+// The remap flags assume panels arranged starting at the TOP-LEFT with "zigzag" wiring.
 CRGB leds[LED_COUNT];
-FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(leds, mw, mh,
-                                                  NEO_MATRIX_TOP + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG);
+FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(
+  leds, mw, mh, NEO_MATRIX_TOP + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG);
 
-// This could also be defined as matrix->color(255,0,0) but those defines
-// are meant to work for adafruit_gfx backends that are lacking color()
-#define LED_BLACK 0
+// Define our text color (bright white)
+#define TEXT_COLOR (matrix->Color(255, 255, 255))
 
-#define LED_RED_VERYLOW (3 << 11)
-#define LED_RED_LOW (7 << 11)
-#define LED_RED_MEDIUM (15 << 11)
-#define LED_RED_HIGH (31 << 11)
+// Global variable for the countdown end time (48 hours from startup)
+unsigned long countdownEnd;
 
-#define LED_GREEN_VERYLOW (1 << 5)
-#define LED_GREEN_LOW (15 << 5)
-#define LED_GREEN_MEDIUM (31 << 5)
-#define LED_GREEN_HIGH (63 << 5)
+// --- BURST EFFECT GLOBALS ---
+// Every burst is triggered every 5000 ms (5 seconds) and lasts for 1000 ms.
+unsigned long lastBurstTime = 0;
+unsigned long burstStart = 0;
+const unsigned long burstInterval = 5000; // 5 seconds between bursts
+const unsigned long burstDuration = 1000; // burst lasts 1 second
+const float maxBurstRadius = 30.0;        // maximum burst radius (in pixels)
 
-#define LED_BLUE_VERYLOW 3
-#define LED_BLUE_LOW 7
-#define LED_BLUE_MEDIUM 15
-#define LED_BLUE_HIGH 31
-
-#define LED_ORANGE_VERYLOW (LED_RED_VERYLOW + LED_GREEN_VERYLOW)
-#define LED_ORANGE_LOW (LED_RED_LOW + LED_GREEN_LOW)
-#define LED_ORANGE_MEDIUM (LED_RED_MEDIUM + LED_GREEN_MEDIUM)
-#define LED_ORANGE_HIGH (LED_RED_HIGH + LED_GREEN_HIGH)
-
-#define LED_PURPLE_VERYLOW (LED_RED_VERYLOW + LED_BLUE_VERYLOW)
-#define LED_PURPLE_LOW (LED_RED_LOW + LED_BLUE_LOW)
-#define LED_PURPLE_MEDIUM (LED_RED_MEDIUM + LED_BLUE_MEDIUM)
-#define LED_PURPLE_HIGH (LED_RED_HIGH + LED_BLUE_HIGH)
-
-#define LED_CYAN_VERYLOW (LED_GREEN_VERYLOW + LED_BLUE_VERYLOW)
-#define LED_CYAN_LOW (LED_GREEN_LOW + LED_BLUE_LOW)
-#define LED_CYAN_MEDIUM (LED_GREEN_MEDIUM + LED_BLUE_MEDIUM)
-#define LED_CYAN_HIGH (LED_GREEN_HIGH + LED_BLUE_HIGH)
-
-#define LED_WHITE_VERYLOW (LED_RED_VERYLOW + LED_GREEN_VERYLOW + LED_BLUE_VERYLOW)
-#define LED_WHITE_LOW (LED_RED_LOW + LED_GREEN_LOW + LED_BLUE_LOW)
-#define LED_WHITE_MEDIUM (LED_RED_MEDIUM + LED_GREEN_MEDIUM + LED_BLUE_MEDIUM)
-#define LED_WHITE_HIGH (LED_RED_HIGH + LED_GREEN_HIGH + LED_BLUE_HIGH)
-
-// Convert a BGR 4/4/4 bitmap to RGB 5/6/5 used by Adafruit_GFX
-void fixdrawRGBBitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h) {
-  uint16_t RGB_bmp_fixed[w * h];
-  for (uint16_t pixel = 0; pixel < w * h; pixel++) {
-    uint8_t r, g, b;
-    uint16_t color = pgm_read_word(bitmap + pixel);
-
-    b = (color & 0xF00) >> 8;
-    g = (color & 0x0F0) >> 4;
-    r = color & 0x00F;
-
-    // expand from 4/4/4 bits per color to 5/6/5
-    b = map(b, 0, 15, 0, 31);
-    g = map(g, 0, 15, 0, 63);
-    r = map(r, 0, 15, 0, 31);
-
-    RGB_bmp_fixed[pixel] = (r << 11) + (g << 5) + b;
-  }
-  matrix->drawRGBBitmap(x, y, RGB_bmp_fixed, w, h);
-}
-
+//---------------------------------------------------------
+// customIndex()
+// Remaps (x,y) coordinates to the correct LED index for your
+// multi-panel wiring with serpentine (zigzag) connections.
 uint16_t customIndex(uint16_t x, uint16_t y) {
-  // Find panel we're located at
   int panel = x / MATRIX_COLUMNS;
   int lx = x % MATRIX_COLUMNS;
-  int ly = y;  // y is the same in every panel
-
-  // Now, within a single panel the LEDs are wired in a "serpentine".
+  int ly = y;
   int i;
   if (ly % 2 == 0) {
-      i = ly * MATRIX_COLUMNS + lx;
+    i = ly * MATRIX_COLUMNS + lx;
   } else {
-      i = (ly + 1) * MATRIX_COLUMNS - lx - 1;
+    i = (ly + 1) * MATRIX_COLUMNS - lx - 1;
   }
-  
-  // Finally, add an offset equal to the number of LEDs in all previous panels.
   return panel * (MATRIX_COLUMNS * MATRIX_ROWS) + i;
 }
 
+//---------------------------------------------------------
+// drawBackgroundEffect()
+// Instead of an intricate moving sine–wave pattern, we now simply
+// fill the background with a dark blue so that the burst effect is visible.
+void drawBackgroundEffect() {
+  // Fill the entire display with a dark blue color.
+  matrix->fillScreen(matrix->Color(0, 0, 20));
+}
 
+//---------------------------------------------------------
+// drawBurstEffect()
+// Every 5 seconds this function triggers a burst effect. Over the course
+// of 1 second an expanding ring (centered on the display) is drawn.
+void drawBurstEffect() {
+  unsigned long currentMillis = millis();
+  // Trigger a new burst every burstInterval (5 seconds)
+  if (currentMillis - lastBurstTime >= burstInterval) {
+    burstStart = currentMillis;
+    lastBurstTime = currentMillis;
+  }
+  
+  // If we are within the burst duration, animate the burst.
+  if (currentMillis - burstStart < burstDuration) {
+    // Compute a normalized time (t goes from 0 to 1 over burstDuration)
+    float t = (currentMillis - burstStart) / (float)burstDuration;
+    // Compute the current radius (from 0 up to maxBurstRadius)
+    float radius = t * maxBurstRadius;
+    
+    // Use the display center as the burst center.
+    float centerX = mw / 2.0;
+    float centerY = mh / 2.0;
+    
+    // For every pixel, if its distance from the center is close to the current radius,
+    // draw it in a bright color.
+    for (int16_t y = 0; y < mh; y++) {
+      for (int16_t x = 0; x < mw; x++) {
+        float dx = x - centerX;
+        float dy = y - centerY;
+        float d = sqrt(dx * dx + dy * dy);
+        if (fabs(d - radius) < 1.0) {
+          // Optionally, you could vary brightness with t.
+          uint16_t burstColor = matrix->Color(255, 255, 255); // white burst
+          matrix->drawPixel(x, y, burstColor);
+        }
+      }
+    }
+  }
+}
+
+//---------------------------------------------------------
+// drawCondensedText()
+// Draws the string 'str' starting at (x,y) using the default font,
+// but uses only (textSize*5) pixels per character (instead of the default 6)
+// so that the gaps between characters are reduced.
+// (The background color is set equal to the text color so that only the "on" pixels are drawn.)
+void drawCondensedText(const char* str, int16_t x, int16_t y, uint16_t color, uint8_t textSize) {
+  int16_t curX = x;
+  for (int i = 0; str[i] != '\0'; i++) {
+    // Draw the character with "transparent" background (by passing the same color)
+    matrix->drawChar(curX, y, str[i], color, color, textSize);
+    // Advance by 5 pixels (times textSize) instead of the usual 6.
+    curX += textSize * 5;
+  }
+}
+
+//---------------------------------------------------------
+// displayCountdownTimer()
+// Computes the remaining time until countdownEnd and draws it in condensed form.
+// The text is scaled (using a custom formula) so that it fits within 90% of the display,
+// then centered both horizontally and vertically. A drop shadow is drawn first.
+void displayCountdownTimer() {
+  // Compute remaining seconds.
+  unsigned long now = millis();
+  unsigned long remainingSeconds = (now >= countdownEnd) ? 0 : (countdownEnd - now) / 1000UL;
+  
+  int hours   = remainingSeconds / 3600;
+  int minutes = (remainingSeconds % 3600) / 60;
+  int seconds = remainingSeconds % 60;
+  
+  // Format the time as HH:MM:SS (8 characters including colons)
+  char timeString[9];
+  sprintf(timeString, "%02d:%02d:%02d", hours, minutes, seconds);
+  
+  // Compute the length of the string.
+  int len = strlen(timeString);
+  // In our condensed drawing, each character is 5 pixels wide and the font is 8 pixels tall at scale 1.
+  int baseWidth = 5 * len;
+  int baseHeight = 8;
+  
+  // Compute the maximum integer scale that fits into 90% of the display.
+  int scaleW = (mw * 90 / 100) / baseWidth;
+  int scaleH = (mh * 90 / 100) / baseHeight;
+  int textSize = (scaleW < scaleH) ? scaleW : scaleH;
+  if (textSize < 1) textSize = 1;
+  
+  // Determine the total drawn width/height.
+  int textWidth = textSize * baseWidth;
+  int textHeight = textSize * baseHeight;
+  
+  // Center the text on the display.
+  int xpos = (mw - textWidth) / 2;
+  int ypos = (mh - textHeight) / 2;
+  
+  // Draw a drop shadow for a nice effect.
+  uint16_t shadowColor = matrix->Color(30, 30, 30);
+  drawCondensedText(timeString, xpos + textSize, ypos + textSize, shadowColor, textSize);
+  // Draw the main countdown text.
+  drawCondensedText(timeString, xpos, ypos, TEXT_COLOR, textSize);
+}
+
+//---------------------------------------------------------
+void setup() {
+  // Set the custom LED remapping function.
+  matrix->setRemapFunction(customIndex);
+  
+  // Initialize FastLED (using the NEOPIXEL definition).
+  FastLED.addLeds<NEOPIXEL, PIN>(leds, LED_COUNT).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(BRIGHTNESS);
+  
+  Serial.begin(9600);
+  
+  // Set the countdown end time to 48 hours from now.
+  countdownEnd = millis() + 48UL * 3600UL * 1000UL;
+}
+
+//---------------------------------------------------------
 void loop() {
-  matrix->clear();
-  matrix->setTextWrap(false);
-  matrix->setBrightness(BRIGHTNESS);
+  // First, draw the (static) dark background.
+  drawBackgroundEffect();
   
-  // Set text color to white
-  matrix->setTextColor(LED_RED_HIGH);
+  // Next, draw the burst effect if active.
+  drawBurstEffect();
   
-  // Set text size (adjust as needed for your matrix size)
-  matrix->setTextSize(2);
+  // Then overlay the condensed, centered countdown timer.
+  displayCountdownTimer();
   
-  // Calculate position to center "36:00:00"
-  int16_t x1, y1;
-  uint16_t w, h;
-  matrix->getTextBounds("36:00:00", 0, 0, &x1, &y1, &w, &h);
-  int xpos = (mw - w) / 2;
-  int ypos = (mh + h) / 2;
-  
-  // Draw the text
-  matrix->setCursor(xpos, ypos);
-  matrix->print("36:00:00");
+  // Update the matrix.
   matrix->show();
   
-  // Add a small delay to prevent flickering
-  delay(100);
+  // A short delay to smooth the animation.
+  delay(50);
 }
 
-void setup() {
-  matrix->setRemapFunction(customIndex);
-
-  FastLED.addLeds<NEOPIXEL, PIN>(leds, LED_COUNT).setCorrection(TypicalLEDStrip);
-  Serial.print("Setup serial: ");
-  Serial.println(LED_COUNT);
-}
