@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <WiFi.h>
 
 #define PIN 12
 #define BRIGHTNESS 16
@@ -16,6 +17,9 @@
 
 #define WIDTH (MATRIX_COLUMNS * PANEL_COUNT)
 #define LED_COUNT (WIDTH * MATRIX_ROWS)
+
+const char* ssid = "Thijs's Phone";
+const char* password = "cultuslake";
 
 int mw = WIDTH;      // Matrix width (42 pixels)
 int mh = MATRIX_ROWS; // Matrix height (28 pixels)
@@ -169,14 +173,31 @@ void displayCountdownTimer() {
 
 //---------------------------------------------------------
 void setup() {
+  delay(1000);
+  Serial.begin(9600);
+  
   // Set the custom LED remapping function.
   matrix->setRemapFunction(customIndex);
   
   // Initialize FastLED (using the NEOPIXEL definition).
   FastLED.addLeds<NEOPIXEL, PIN>(leds, LED_COUNT).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(BRIGHTNESS);
+
+  Serial.println("\nConnecting");
+
+  // Connect the wifi
+  WiFi.begin(ssid, password);
+
+  while(WiFi.status() != WL_CONNECTED){
+    Serial.print(".");
+    delay(100);
+  }
+
+  Serial.println("\nConnected to the WiFi network");
+  Serial.print("Local ESP32 IP: ");
+  Serial.println(WiFi.localIP());
+
   
-  Serial.begin(9600);
   
   // Set the countdown end time to 48 hours from now.
   countdownEnd = millis() + 48UL * 3600UL * 1000UL;
@@ -199,4 +220,3 @@ void loop() {
   // A short delay to smooth the animation.
   delay(50);
 }
-
