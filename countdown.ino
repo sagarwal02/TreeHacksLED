@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <WiFi.h>
+#include "time.h"
 
 #define PIN 12
 #define BRIGHTNESS 16
@@ -20,6 +21,10 @@
 
 const char* ssid = "Thijs's Phone";
 const char* password = "cultuslake";
+
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 0;
+const int   daylightOffset_sec = 3600;
 
 int mw = WIDTH;      // Matrix width (42 pixels)
 int mh = MATRIX_ROWS; // Matrix height (28 pixels)
@@ -184,6 +189,11 @@ void setup() {
   FastLED.setBrightness(BRIGHTNESS);
 
   Serial.println("\nConnecting");
+  
+  matrix->clear();
+	matrix->setCursor(0,0);
+	matrix->setTextColor(matrix->Color(255, 255, 255));
+	matrix->print("Connecting...");
 
   // Connect the wifi
   WiFi.begin(ssid, password);
@@ -197,7 +207,22 @@ void setup() {
   Serial.print("Local ESP32 IP: ");
   Serial.println(WiFi.localIP());
 
-  
+  matrix->clear();
+	matrix->setTextColor(matrix->Color(0, 255, 0));
+	matrix->print("Connected!");
+
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+  struct tm timeinfo;
+
+  if(!getLocalTime(&timeinfo)){
+    matrix->clear();
+    matrix->setTextColor(matrix->Color(255, 0, 0));
+    matrix->print("Time failed");
+    return;
+  }
+
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
   
   // Set the countdown end time to 48 hours from now.
   countdownEnd = millis() + 48UL * 3600UL * 1000UL;
