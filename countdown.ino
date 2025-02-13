@@ -9,12 +9,12 @@
 #include "time.h"
 
 #define PIN 12
-#define BRIGHTNESS 16
+#define BRIGHTNESS 255
 
 // Each panel is 14 columns x 28 rows; we have 3 panels side by side.
 #define MATRIX_COLUMNS 14
 #define MATRIX_ROWS 28
-#define PANEL_COUNT 3
+#define PANEL_COUNT 4
 
 #define WIDTH (MATRIX_COLUMNS * PANEL_COUNT)
 #define LED_COUNT (WIDTH * MATRIX_ROWS)
@@ -25,6 +25,7 @@ const char* password = "cultuslake";
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 0;
 const int   daylightOffset_sec = 3600;
+const time_t end_time = 1739725200000;
 
 int mw = WIDTH;      // Matrix width (42 pixels)
 int mh = MATRIX_ROWS; // Matrix height (28 pixels)
@@ -117,64 +118,73 @@ void drawBurstEffect() {
 
 //---------------------------------------------------------
 // drawCondensedText()
-// Draws the string 'str' starting at (x,y) using the default font,
-// but uses only (textSize*5) pixels per character (instead of the default 6)
-// so that the gaps between characters are reduced.
-// (The background color is set equal to the text color so that only the "on" pixels are drawn.)
+// Draws the string 'str' starting at (x,y) using the default font.
+// For colons, we allocate a narrower cell so that they don’t take up 5 pixels.
 void drawCondensedText(const char* str, int16_t x, int16_t y, uint16_t color, uint8_t textSize) {
   int16_t curX = x;
   for (int i = 0; str[i] != '\0'; i++) {
-    // Draw the character with "transparent" background (by passing the same color)
-    matrix->drawChar(curX, y, str[i], color, color, textSize);
-    // Advance by 5 pixels (times textSize) instead of the usual 6.
-    curX += textSize * 5;
+    int cellWidth = 5; // default allocated cell width
+    int charWidth = 5; // default drawn glyph width
+    int xOffset = 0;
+    
+    if (str[i] == ':') {
+      // For colons, allocate a smaller cell and adjust the offset.
+      charWidth = 2;      
+      cellWidth = 2;
+      // Normally, (cellWidth - charWidth) / 2 centers it,
+      // but subtracting an extra 1 shifts it left a bit.
+      xOffset = ((cellWidth - charWidth) / 2) - 1;
+    }
+    
+    // Draw the character with the calculated offset.
+    matrix->drawChar(curX + textSize * xOffset, y, str[i], color, color, textSize);
+    
+    // Advance the X position by the allocated cell width.
+    curX += textSize * cellWidth;
   }
 }
 
-//---------------------------------------------------------
-// displayCountdownTimer()
-// Computes the remaining time until countdownEnd and draws it in condensed form.
-// The text is scaled (using a custom formula) so that it fits within 90% of the display,
-// then centered both horizontally and vertically. A drop shadow is drawn first.
+
 void displayCountdownTimer() {
   // Compute remaining seconds.
   unsigned long now = millis();
   unsigned long remainingSeconds = (now >= countdownEnd) ? 0 : (countdownEnd - now) / 1000UL;
-  
+
   int hours   = remainingSeconds / 3600;
   int minutes = (remainingSeconds % 3600) / 60;
   int seconds = remainingSeconds % 60;
-  
-  // Format the time as HH:MM:SS (8 characters including colons)
+
+  // Format the time as HH:MM:SS.
   char timeString[9];
   sprintf(timeString, "%02d:%02d:%02d", hours, minutes, seconds);
+
+  float textSize = 2;
+
+  // Dynamically calculate the total width of the string.
+  float textWidth = 0;
+  for (int i = 0; timeString[i] != '\0'; i++) {
+    if (timeString[i] == ':')
+      textWidth += 2 * textSize;  // cell width for colons
+    else
+      textWidth += 6 * textSize;  // cell width for other characters
+  }
   
-  // Compute the length of the string.
-  int len = strlen(timeString);
-  // In our condensed drawing, each character is 5 pixels wide and the font is 8 pixels tall at scale 1.
-  int baseWidth = 5 * len;
-  int baseHeight = 8;
-  
-  // Compute the maximum integer scale that fits into 90% of the display.
-  int scaleW = (mw * 90 / 100) / baseWidth;
-  int scaleH = (mh * 90 / 100) / baseHeight;
-  int textSize = (scaleW < scaleH) ? scaleW : scaleH;
-  if (textSize < 1) textSize = 1;
-  
-  // Determine the total drawn width/height.
-  int textWidth = textSize * baseWidth;
-  int textHeight = textSize * baseHeight;
-  
+  float textHeight = textSize * 8;  // font height remains constant
+
   // Center the text on the display.
-  int xpos = (mw - textWidth) / 2;
-  int ypos = (mh - textHeight) / 2;
-  
-  // Draw a drop shadow for a nice effect.
+  float xpos = (mw - textWidth) / 2;
+  float ypos = (mh - textHeight) / 2;
+
+  // Draw a drop shadow.
   uint16_t shadowColor = matrix->Color(30, 30, 30);
   drawCondensedText(timeString, xpos + textSize, ypos + textSize, shadowColor, textSize);
+
   // Draw the main countdown text.
   drawCondensedText(timeString, xpos, ypos, TEXT_COLOR, textSize);
 }
+
+time_t now;
+unsigned long started_at;
 
 //---------------------------------------------------------
 void setup() {
@@ -210,6 +220,7 @@ void setup() {
   matrix->clear();
 	matrix->setTextColor(matrix->Color(0, 255, 0));
 	matrix->print("Connected!");
+  Serial.println("Connected!");
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
@@ -222,10 +233,16 @@ void setup() {
     return;
   }
 
+  time(&now);
+  started_at = millis();
+
   Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  Serial.println(now);
   
   // Set the countdown end time to 48 hours from now.
-  countdownEnd = millis() + 48UL * 3600UL * 1000UL;
+  countdownEnd = (end_time - (now * 1000UL) + millis());
+  Serial.println("got here...");
+  Serial.println(countdownEnd);
 }
 
 //---------------------------------------------------------
