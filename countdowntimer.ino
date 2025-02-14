@@ -25,12 +25,21 @@
 int mw = WIDTH;      // Matrix width
 int mh = MATRIX_ROWS; // Matrix height
 signed long remainingTime;
+int burst = 0;
 
 // Create the LED array and initialize the NeoMatrix object.
 // The remap flags assume panels arranged from the TOP-LEFT with zigzag wiring.
 CRGB leds[LED_COUNT];
 FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(
   leds, mw, mh, NEO_MATRIX_TOP + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG);
+
+const uint8_t heartSprite[5][5] = {
+  {0, 1, 0, 1, 0},
+  {1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1},
+  {0, 1, 1, 1, 0},
+  {0, 0, 1, 0, 0}
+};
 
 // ------------------------------
 // Custom LED remapping function.
@@ -57,6 +66,11 @@ const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 0;          // Adjust to your time zone
 const int daylightOffset_sec = 0;      // Adjust for DST if needed
 
+unsigned long lastBurstTime = 0;
+unsigned long burstStart = 0;
+const unsigned long burstInterval = 5000; // 5 seconds between bursts
+const unsigned long burstDuration = 1000; // burst lasts 1 second
+const float maxBurstRadius = 45.0;        // maximum burst radius (in pixels)
 // ------------------------------
 // Countdown timer configuration
 // ------------------------------
@@ -71,6 +85,88 @@ time_t now;
 // This global will store the initial countdown duration in seconds.
 signed long initialRemainingSeconds = 0;
 
+struct Heart {
+  float x, y;
+  float vx, vy;
+};
+
+Heart hearts[4];
+
+// Global boundaries (inside the green border).
+const int leftBound   = 1;
+const int rightBound  = WIDTH - 2;  // mw - 2
+const int topBound    = 1;
+const int bottomBound = MATRIX_ROWS - 2;  // mh - 2
+
+// The forbidden area is where the countdown numbers are drawn.
+// Based on drawCountdown() with textSize=2, textWidth=76, textHeight=16,
+// startX = 2 and startY = 7 (approximately). Here we define a margin so the hearts never enter.
+const int forbiddenLeft   = 3;  // countdown drawing starts at x=3
+const int forbiddenTop    = 7;  // countdown drawn at y=7
+const int forbiddenRight  = forbiddenLeft + 76; // 79
+const int forbiddenBottom = forbiddenTop + 16;  // 23
+
+// Update each heart's position and bounce off the outer boundaries and the forbidden region.
+void updateHearts() {
+  for (int i = 0; i < 4; i++) {
+    hearts[i].x += hearts[i].vx;
+    hearts[i].y += hearts[i].vy;
+    
+    // Bounce off outer boundaries.
+    if (hearts[i].x < leftBound) {
+      hearts[i].x = leftBound;
+      hearts[i].vx = -hearts[i].vx;
+    } else if (hearts[i].x > rightBound) {
+      hearts[i].x = rightBound;
+      hearts[i].vx = -hearts[i].vx;
+    }
+    if (hearts[i].y < topBound) {
+      hearts[i].y = topBound;
+      hearts[i].vy = -hearts[i].vy;
+    } else if (hearts[i].y > bottomBound) {
+      hearts[i].y = bottomBound;
+      hearts[i].vy = -hearts[i].vy;
+    }
+    
+    // If inside the forbidden (countdown) area, bounce off its nearest edge.
+    if (hearts[i].x >= forbiddenLeft && hearts[i].x <= forbiddenRight &&
+        hearts[i].y >= forbiddenTop && hearts[i].y <= forbiddenBottom) {
+      float distLeft   = hearts[i].x - forbiddenLeft;
+      float distRight  = forbiddenRight - hearts[i].x;
+      float distTop    = hearts[i].y - forbiddenTop;
+      float distBottom = forbiddenBottom - hearts[i].y;
+      float minDist = distLeft;
+      int direction = 0; // 0: left, 1: right, 2: top, 3: bottom.
+      if (distRight < minDist) { minDist = distRight; direction = 1; }
+      if (distTop < minDist) { minDist = distTop; direction = 2; }
+      if (distBottom < minDist) { minDist = distBottom; direction = 3; }
+      
+      // Bounce off the closest side.
+      if (direction == 0) {
+        hearts[i].x = forbiddenLeft;
+        hearts[i].vx = -fabs(hearts[i].vx);
+      } else if (direction == 1) {
+        hearts[i].x = forbiddenRight;
+        hearts[i].vx = fabs(hearts[i].vx);
+      } else if (direction == 2) {
+        hearts[i].y = forbiddenTop;
+        hearts[i].vy = -fabs(hearts[i].vy);
+      } else if (direction == 3) {
+        hearts[i].y = forbiddenBottom;
+        hearts[i].vy = fabs(hearts[i].vy);
+      }
+    }
+  }
+}
+
+// Draw all bouncing hearts.
+void drawBouncingHearts() {
+
+  uint16_t heartColor = matrix->Color(255, 192, 203);
+  for (int i = 0; i < 4; i++) {
+    drawHeartSpriteAt((int)hearts[i].x, (int)hearts[i].y, heartColor);
+  }
+}
 // ------------------------------
 // Fire simulation globals
 // ------------------------------
@@ -129,6 +225,75 @@ void getTreePosition(float progress, int rectX, int rectY, int rectW, int rectH,
   }
 }
 
+void drawBurstEffect() {
+  unsigned long currentMillis = millis();
+  // Trigger a new burst every burstInterval (e.g., 5000 ms)
+  if ((remainingTime % 60) % 10 == 0){
+  // if (currentMillis - lastBurstTime >= burstInterval) {
+    burstStart = currentMillis;
+    lastBurstTime = currentMillis;
+  }
+  
+  // If we are within the burst duration, animate the burst.
+  if (currentMillis - burstStart < burstDuration) {
+    // Compute normalized time (t goes from 0 to 1 over burstDuration)
+    float t = (currentMillis - burstStart) / (float)burstDuration;
+    // For a heart burst, we use the same idea as before:
+    // at t==1 the heart has grown to its maximum size.
+    // (maxBurstRadius now serves as the maximum heart size.)
+    float currentHeartSize = t * maxBurstRadius;
+    
+    // Use the display center as the heart burst center.
+    float centerX = mw / 2.0;
+    float centerY = mh / 2.0;
+    
+    // Set the burst color to red (or choose your preferred color)
+    uint16_t burstColor = matrix->Color(255, 0, 0);
+    
+    // Draw a heart outline using its parametric equation.
+    // Standard heart parametric equations are:
+    //   x = 16*sin^3(a)
+    //   y = 13*cos(a) - 5*cos(2*a) - 2*cos(3*a) - cos(4*a)
+    //
+    // We first “normalize” these values by dividing by 16 so that when multiplied
+    // by currentHeartSize the heart expands smoothly.
+    //
+    // To make the line a bit thicker, we draw a small 3x3 block at each computed point.
+    for (float a = 0; a < 2 * PI; a += 0.03) {
+      float nx = pow(sin(a), 3);  // normalized x
+      float ny = (13.0/16.0)*cos(a) - (5.0/16.0)*cos(2*a) - (2.0/16.0)*cos(3*a) - (1.0/16.0)*cos(4*a);
+      
+      int cx = centerX + (int)(currentHeartSize * nx);
+      // Subtract ny because our display’s y increases downward.
+      int cy = centerY - (int)(currentHeartSize * ny);
+      
+      // Draw a 3x3 block for a thicker outline.
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int x = cx + dx;
+          int y = cy + dy;
+          if (x >= 0 && x < mw && y >= 0 && y < mh) {
+            matrix->drawPixel(x, y, burstColor);
+          }
+        }
+      }
+    }
+  }
+}
+void drawHeartSpriteAt(int centerX, int centerY, uint16_t color) {
+  const int spriteSize = 5;
+  int offset = spriteSize / 2;  // centers the 5x5 sprite (offset = 2)
+  for (int i = 0; i < spriteSize; i++) {
+    for (int j = 0; j < spriteSize; j++) {
+      if (heartSprite[i][j]) {
+        int x = centerX - offset + j;
+        int y = centerY - offset + i;
+        if (x >= 0 && x < mw && y >= 0 && y < mh)
+          matrix->drawPixel(x, y, color);
+      }
+    }
+  }
+}
 // Draw the running tree around the countdown text rectangle.
 void drawRunningTree(int rectX, int rectY, int rectW, int rectH) {
   // Cycle duration in milliseconds
@@ -221,7 +386,10 @@ void drawCountdown() {
   // x += digitCellWidth;  // Not needed after last digit.
   
   // Draw the running tree around the bounding rectangle of the countdown text.
-  drawRunningTree(startX, startY-4, 79, 21);
+  if (burst == 0){
+    drawRunningTree(startX, startY-4, 79, 21);
+  }
+  
 }
 
 // --------------------------------------------------------------------
@@ -284,6 +452,26 @@ void setup() {
 
   // Seed random number generator.
   randomSeed(analogRead(0));
+
+  hearts[0].x = leftBound + 2;
+  hearts[0].y = topBound + 2;
+  hearts[0].vx = 0.3;
+  hearts[0].vy = 0.8;
+  
+  hearts[1].x = rightBound - 2;
+  hearts[1].y = topBound + 2;
+  hearts[1].vx = -0.5;
+  hearts[1].vy = 0.8;
+  
+  hearts[2].x = leftBound + 2;
+  hearts[2].y = bottomBound - 2;
+  hearts[2].vx = 0.7;
+  hearts[2].vy = -0.8;
+  
+  hearts[3].x = rightBound - 2;
+  hearts[3].y = bottomBound - 2;
+  hearts[3].vx = -0.6;
+  hearts[3].vy = -0.8;
 }
 
 void loop() {
@@ -303,14 +491,23 @@ void loop() {
   
   matrix->clear();
   // Update the fire simulation background with intensity based on progress.
-  
+  unsigned long currentMillis = millis();
+  if(currentMillis - burstStart < burstDuration) {
+    updateHearts();
+    drawBouncingHearts();
+    burst = 1;
+  }
+
   // Overlay the countdown timer text (with proper 2-pixel gaps around colons)
   // and the running tree.
   drawCountdown();
   
   // Draw an inset green border (1 pixel in from each edge).
   drawGreenBorder();
+
+  drawBurstEffect();
   
   matrix->show();
+  burst = 0;
   delay(75);
 }
